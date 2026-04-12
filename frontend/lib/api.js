@@ -1,5 +1,9 @@
 const BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
 
+// These paths authenticate the user; a 401 here is a credential failure, not
+// an expired session, so we must not fire the auto-logout event for them.
+const AUTH_PATHS = ['/api/auth/login', '/api/auth/register'];
+
 function getToken() {
   if (typeof window === 'undefined') return null;
   return localStorage.getItem('token');
@@ -22,6 +26,16 @@ async function request(path, options = {}) {
     try { data = await res.json(); } catch { /* ignore */ }
     const err = new Error(data.message || `HTTP ${res.status}`);
     err.status = res.status;
+
+    // When any protected endpoint returns 401 it means the token has expired
+    // or been revoked.  Fire a global event so AuthContext can auto-logout the
+    // user and redirect to the login page with a friendly "session expired"
+    // message.  We deliberately skip this for the login / register paths
+    // because a 401 there is an intentional "wrong credentials" response.
+    if (res.status === 401 && !AUTH_PATHS.includes(path) && typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('auth:expired'));
+    }
+
     throw err;
   }
 

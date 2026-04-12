@@ -11,6 +11,7 @@ export default function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
   const { login } = useAuth();
   const router = useRouter();
+  const sessionExpired = router.query.expired === '1';
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -56,6 +57,12 @@ export default function LoginPage() {
             Register
           </button>
         </div>
+
+        {sessionExpired && !error && (
+          <div className="bg-amber-50 text-amber-800 border border-amber-200 rounded-lg px-3 py-2 text-sm mb-4">
+            Your session has expired. Please log in again.
+          </div>
+        )}
 
         {error && (
           <div className="bg-red-50 text-red-700 border border-red-200 rounded-lg px-3 py-2 text-sm mb-4">

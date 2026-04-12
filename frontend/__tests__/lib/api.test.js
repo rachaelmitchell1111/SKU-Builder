@@ -102,6 +102,67 @@ describe('request error handling', () => {
   });
 });
 
+// ── auth:expired event ────────────────────────────────────────────────────────
+
+describe('auth:expired custom event', () => {
+  function make401() {
+    return jest.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      json: async () => ({ message: 'Expired' }),
+    });
+  }
+
+  it('fires auth:expired when a protected endpoint returns 401', async () => {
+    global.fetch = make401();
+    const handler = jest.fn();
+    window.addEventListener('auth:expired', handler);
+    await expect(getMe()).rejects.toThrow('Expired');
+    expect(handler).toHaveBeenCalledTimes(1);
+    window.removeEventListener('auth:expired', handler);
+  });
+
+  it('fires auth:expired for items endpoints too (not only /me)', async () => {
+    global.fetch = make401();
+    const handler = jest.fn();
+    window.addEventListener('auth:expired', handler);
+    await expect(getItems()).rejects.toThrow();
+    expect(handler).toHaveBeenCalledTimes(1);
+    window.removeEventListener('auth:expired', handler);
+  });
+
+  it('does NOT fire auth:expired when login returns 401', async () => {
+    global.fetch = make401();
+    const handler = jest.fn();
+    window.addEventListener('auth:expired', handler);
+    await expect(login('a@b.com', 'wrong')).rejects.toThrow();
+    expect(handler).not.toHaveBeenCalled();
+    window.removeEventListener('auth:expired', handler);
+  });
+
+  it('does NOT fire auth:expired when register returns 401', async () => {
+    global.fetch = make401();
+    const handler = jest.fn();
+    window.addEventListener('auth:expired', handler);
+    await expect(register('a@b.com', 'short')).rejects.toThrow();
+    expect(handler).not.toHaveBeenCalled();
+    window.removeEventListener('auth:expired', handler);
+  });
+
+  it('does NOT fire auth:expired on non-401 errors', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 403,
+      json: async () => ({ message: 'Forbidden' }),
+    });
+    const handler = jest.fn();
+    window.addEventListener('auth:expired', handler);
+    await expect(getUsers()).rejects.toThrow('Forbidden');
+    expect(handler).not.toHaveBeenCalled();
+    window.removeEventListener('auth:expired', handler);
+  });
+});
+
 // ── Items ─────────────────────────────────────────────────────────────────────
 
 describe('getItems()', () => {

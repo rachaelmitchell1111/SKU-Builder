@@ -10,6 +10,13 @@ jest.mock('../../lib/api', () => ({
   getMe: jest.fn(),
 }));
 
+// AuthContext now uses useRouter for the auth:expired redirect
+const mockReplace = jest.fn();
+const mockAuthCtxRouter = { replace: mockReplace };
+jest.mock('next/router', () => ({
+  useRouter: () => mockAuthCtxRouter,
+}));
+
 import { getMe } from '../../lib/api';
 
 // Helper: a component that reads AuthContext and exposes values via text
@@ -31,6 +38,7 @@ function renderWithProvider() {
 beforeEach(() => {
   localStorage.clear();
   jest.clearAllMocks();
+  mockReplace.mockClear();
 });
 
 describe('AuthProvider — initial state', () => {
@@ -120,5 +128,28 @@ describe('logout()', () => {
 
     expect(screen.getByText('no user')).toBeInTheDocument();
     expect(localStorage.getItem('token')).toBeNull();
+  });
+});
+
+describe('auth:expired event', () => {
+  it('clears user and redirects to /login?expired=1 when auth:expired fires', async () => {
+    localStorage.setItem('token', 'existing');
+    getMe.mockResolvedValueOnce({ _id: '4', email: 'x@y.com', role: 'user' });
+
+    render(
+      <AuthProvider>
+        <AuthConsumer />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByText('user:x@y.com')).toBeInTheDocument());
+
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('auth:expired'));
+    });
+
+    expect(screen.getByText('no user')).toBeInTheDocument();
+    expect(localStorage.getItem('token')).toBeNull();
+    expect(mockReplace).toHaveBeenCalledWith('/login?expired=1');
   });
 });

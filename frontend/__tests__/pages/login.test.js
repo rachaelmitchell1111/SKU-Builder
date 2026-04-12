@@ -15,8 +15,10 @@ import userEvent from '@testing-library/user-event';
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
 const mockPush = jest.fn();
+// query is mutable so individual tests can override it
+const mockLoginRouter = { push: mockPush, query: {} };
 jest.mock('next/router', () => ({
-  useRouter: () => ({ push: mockPush }),
+  useRouter: () => mockLoginRouter,
 }));
 
 const mockApiLogin = jest.fn();
@@ -54,6 +56,8 @@ async function fillAndSubmit(user, email = 'test@example.com', password = 'secre
 
 beforeEach(() => {
   jest.clearAllMocks();
+  // reset query between tests
+  mockLoginRouter.query = {};
 });
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -164,5 +168,37 @@ describe('LoginPage — register flow', () => {
     await fillAndSubmit(user, 'new@user.com', 'mypassword');
     await waitFor(() => expect(mockApiRegister).toHaveBeenCalledWith('new@user.com', 'mypassword'));
     expect(mockPush).toHaveBeenCalledWith('/items');
+  });
+});
+
+describe('LoginPage — session expired banner', () => {
+  it('shows the banner when ?expired=1 is in the query', () => {
+    mockLoginRouter.query = { expired: '1' };
+    render(<LoginPage />);
+    expect(
+      screen.getByText('Your session has expired. Please log in again.'),
+    ).toBeInTheDocument();
+  });
+
+  it('does NOT show the banner when expired is absent', () => {
+    mockLoginRouter.query = {};
+    render(<LoginPage />);
+    expect(
+      screen.queryByText('Your session has expired. Please log in again.'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('hides the banner once an error message is shown', async () => {
+    mockLoginRouter.query = { expired: '1' };
+    mockApiLogin.mockRejectedValueOnce(new Error('Invalid credentials'));
+    const user = userEvent.setup();
+    render(<LoginPage />);
+
+    expect(screen.getByText('Your session has expired. Please log in again.')).toBeInTheDocument();
+    await fillAndSubmit(user);
+    await waitFor(() => expect(screen.getByText('Invalid credentials')).toBeInTheDocument());
+    expect(
+      screen.queryByText('Your session has expired. Please log in again.'),
+    ).not.toBeInTheDocument();
   });
 });
