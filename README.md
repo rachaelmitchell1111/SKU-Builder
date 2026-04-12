@@ -42,6 +42,8 @@ Set the following variables in `.env`:
 | PATCH | `/api/items/:id/restore` | Admin | Restore soft-deleted item |
 | POST | `/api/items/bulk-delete` | Admin | Bulk soft-delete |
 | POST | `/api/items/bulk-restore` | Admin | Bulk restore |
+| GET | `/api/admin/users` | Admin | List all users |
+| PATCH | `/api/admin/users/:id/role` | Admin | Set a user's role (`user`/`admin`) |
 
 Interactive Swagger UI: **`GET /api/docs`**
 
@@ -82,3 +84,74 @@ npm run dev                         # starts on http://localhost:3001
 - **Image upload** — click any image slot (main/top/bottom/left/right/brandSize) to upload
 - **Admin controls** — soft-delete and restore buttons per card; bulk select + bulk delete/restore; "Show deleted" toggle
 - **Role badge** — admins see an `admin` chip next to their email in the nav bar
+
+---
+
+## Deployment
+
+### Docker Compose (recommended)
+
+The easiest way to run the full stack (backend + frontend + MongoDB) locally or on a server.
+
+**1. Create a `.env` file at the repository root** (copy from `.env.example` and fill in your values):
+
+```bash
+cp .env.example .env
+```
+
+At minimum set:
+
+| Variable | Description |
+|---|---|
+| `JWT_SECRET` | Long random string used to sign JWTs |
+| `CLOUDINARY_CLOUD_NAME` | Cloudinary cloud name |
+| `CLOUDINARY_API_KEY` | Cloudinary API key |
+| `CLOUDINARY_API_SECRET` | Cloudinary API secret |
+| `NEXT_PUBLIC_API_URL` | Public URL of the backend (e.g. `http://localhost:3000`) |
+
+**2. Start all services:**
+
+```bash
+docker compose up --build
+```
+
+- Backend → `http://localhost:3000`
+- Frontend → `http://localhost:3001`
+- MongoDB data persisted in a named Docker volume (`mongo_data`)
+
+**3. Stop:**
+
+```bash
+docker compose down          # keep data
+docker compose down -v       # also remove the MongoDB volume
+```
+
+### Container Registry (GitHub Actions CD)
+
+On every push to `main` the `Docker` workflow builds both images and pushes them to the **GitHub Container Registry** (GHCR):
+
+```
+ghcr.io/<owner>/sku-builder/backend:latest
+ghcr.io/<owner>/sku-builder/frontend:latest
+```
+
+Tagged with both `latest` and the commit SHA.
+
+To provide the backend public URL at build time, set a repository variable `NEXT_PUBLIC_API_URL` in **Settings → Variables → Actions**.
+
+### Deploying to a cloud VM
+
+1. Install Docker + Docker Compose on the server.
+2. Clone the repository (or copy the `docker-compose.yml` and `.env` files).
+3. Fill in `.env` with production values.
+4. Run `docker compose up -d --build`.
+
+To pull pre-built images from GHCR instead of building on the server, replace the `build:` sections in `docker-compose.yml` with `image:` references:
+
+```yaml
+backend:
+  image: ghcr.io/<owner>/sku-builder/backend:latest
+
+frontend:
+  image: ghcr.io/<owner>/sku-builder/frontend:latest
+```
