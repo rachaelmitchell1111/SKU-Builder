@@ -1,10 +1,32 @@
 const express = require('express');
 const router = express.Router();
 const { body, validationResult } = require('express-validator');
+const rateLimit = require('express-rate-limit');
+const mongoose = require('mongoose');
 const Item = require('../models/Item');
 const { generateSKU } = require('../index');
 const { protect } = require('../middleware/auth');
 const upload = require('../middleware/upload');
+
+const readLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 200,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { message: 'Too many requests, please try again later.' },
+});
+
+const writeLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 50,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { message: 'Too many requests, please try again later.' },
+});
+
+function isValidObjectId(id) {
+    return mongoose.Types.ObjectId.isValid(id) && String(new mongoose.Types.ObjectId(id)) === id;
+}
 
 const itemValidation = [
     body('name').notEmpty().withMessage('Name is required.'),
@@ -22,9 +44,9 @@ function validate(req, res, next) {
     next();
 }
 
-// GET all items (with optional pagination and filtering)
-// Query params: page, limit, category, color, minPrice, maxPrice
-router.get('/', async (req, res, next) => {
+// GET all items (with optional pagination, filtering, and sorting)
+// Query params: page, limit, category, color, minPrice, maxPrice, sortBy, order
+router.get('/', readLimiter, async (req, res, next) => {
     try {
         const page = Math.max(1, parseInt(req.query.page, 10) || 1);
         const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
@@ -47,8 +69,13 @@ router.get('/', async (req, res, next) => {
             if (!isNaN(maxPrice)) filter.price.$lte = maxPrice;
         }
 
+        const allowedSortFields = ['name', 'price', 'createdAt', 'stockAmount'];
+        const sortBy = allowedSortFields.includes(req.query.sortBy) ? req.query.sortBy : 'createdAt';
+        const order = req.query.order === 'asc' ? 1 : -1;
+        const sort = { [sortBy]: order };
+
         const [items, total] = await Promise.all([
-            Item.find(filter).skip(skip).limit(limit),
+            Item.find(filter).sort(sort).skip(skip).limit(limit),
             Item.countDocuments(filter),
         ]);
 
@@ -65,8 +92,9 @@ router.get('/', async (req, res, next) => {
 });
 
 // GET item by ID
-router.get('/:id', async (req, res, next) => {
+router.get('/:id', readLimiter, async (req, res, next) => {
     try {
+        if (!isValidObjectId(req.params.id)) return res.status(400).json({ message: 'Invalid item ID.' });
         const item = await Item.findById(req.params.id);
         if (!item) return res.status(404).json({ message: 'Item not found.' });
         res.status(200).json(item);
@@ -76,7 +104,7 @@ router.get('/:id', async (req, res, next) => {
 });
 
 // POST create new item with auto-generated SKU
-router.post('/', protect, itemValidation, validate, async (req, res, next) => {
+router.post('/', writeLimiter, protect, itemValidation, validate, async (req, res, next) => {
     try {
         const { name, price, category, color, stockAmount, images } = req.body;
         const newItem = new Item({
@@ -98,6 +126,7 @@ router.post('/', protect, itemValidation, validate, async (req, res, next) => {
 // POST upload images for an item
 router.post(
     '/:id/images',
+    writeLimiter,
     protect,
     upload.fields([
         { name: 'top', maxCount: 1 },
@@ -109,6 +138,7 @@ router.post(
     ]),
     async (req, res, next) => {
         try {
+            if (!isValidObjectId(req.params.id)) return res.status(400).json({ message: 'Invalid item ID.' });
             const item = await Item.findById(req.params.id);
             if (!item) return res.status(404).json({ message: 'Item not found.' });
 
@@ -133,14 +163,32 @@ router.post(
 );
 
 // PUT update item
-router.put('/:id', protect, async (req, res, next) => {
+router.put('/:id', writeLimiter, protect, async (req, res, next) => {
     try {
-        const allowedFields = ['name', 'category', 'color', 'price', 'stockAmount', 'images'];
+        if (!isValidObjectId(req.params.id)) return res.status(400).json({ message: 'Invalid item ID.' });
+        const stringFields = ['name', 'category', 'color'];
         const updates = {};
-        for (const field of allowedFields) {
+        for (const field of stringFields) {
             if (Object.prototype.hasOwnProperty.call(req.body, field)) {
-                updates[field] = req.body[field];
+                updates[field] = String(req.body[field]);
             }
+        }
+        if (Object.prototype.hasOwnProperty.call(req.body, 'price')) {
+            const price = parseFloat(req.body.price);
+            if (isNaN(price) || price < 0) {
+                return res.status(400).json({ message: 'price must be a non-negative number.' });
+            }
+            updates.price = price;
+        }
+        if (Object.prototype.hasOwnProperty.call(req.body, 'stockAmount')) {
+            const stockAmount = parseInt(req.body.stockAmount, 10);
+            if (isNaN(stockAmount) || stockAmount < 0) {
+                return res.status(400).json({ message: 'stockAmount must be a non-negative integer.' });
+            }
+            updates.stockAmount = stockAmount;
+        }
+        if (Object.prototype.hasOwnProperty.call(req.body, 'images') && typeof req.body.images === 'object' && req.body.images !== null) {
+            updates.images = req.body.images;
         }
         const updatedItem = await Item.findByIdAndUpdate(req.params.id, updates, { new: true, runValidators: true });
         if (!updatedItem) return res.status(404).json({ message: 'Item not found.' });
@@ -151,8 +199,9 @@ router.put('/:id', protect, async (req, res, next) => {
 });
 
 // DELETE item
-router.delete('/:id', protect, async (req, res, next) => {
+router.delete('/:id', writeLimiter, protect, async (req, res, next) => {
     try {
+        if (!isValidObjectId(req.params.id)) return res.status(400).json({ message: 'Invalid item ID.' });
         const deletedItem = await Item.findByIdAndDelete(req.params.id);
         if (!deletedItem) return res.status(404).json({ message: 'Item not found.' });
         res.status(204).send();

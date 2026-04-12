@@ -115,7 +115,7 @@ describe('Items routes', () => {
     });
 
     it('GET /api/items — returns paginated list of items', async () => {
-        Item.find.mockReturnValue({ skip: jest.fn().mockReturnValue({ limit: jest.fn().mockResolvedValue([mockItem]) }) });
+        Item.find.mockReturnValue({ sort: jest.fn().mockReturnValue({ skip: jest.fn().mockReturnValue({ limit: jest.fn().mockResolvedValue([mockItem]) }) }) });
         Item.countDocuments.mockResolvedValue(1);
 
         const res = await request(app).get('/api/items');
@@ -129,7 +129,7 @@ describe('Items routes', () => {
     });
 
     it('GET /api/items — respects page and limit query params', async () => {
-        Item.find.mockReturnValue({ skip: jest.fn().mockReturnValue({ limit: jest.fn().mockResolvedValue([mockItem]) }) });
+        Item.find.mockReturnValue({ sort: jest.fn().mockReturnValue({ skip: jest.fn().mockReturnValue({ limit: jest.fn().mockResolvedValue([mockItem]) }) }) });
         Item.countDocuments.mockResolvedValue(50);
 
         const res = await request(app).get('/api/items?page=2&limit=10');
@@ -140,7 +140,7 @@ describe('Items routes', () => {
     });
 
     it('GET /api/items — filters by category and color', async () => {
-        Item.find.mockReturnValue({ skip: jest.fn().mockReturnValue({ limit: jest.fn().mockResolvedValue([mockItem]) }) });
+        Item.find.mockReturnValue({ sort: jest.fn().mockReturnValue({ skip: jest.fn().mockReturnValue({ limit: jest.fn().mockResolvedValue([mockItem]) }) }) });
         Item.countDocuments.mockResolvedValue(1);
 
         const res = await request(app).get('/api/items?category=Shirts&color=Blue');
@@ -149,12 +149,38 @@ describe('Items routes', () => {
     });
 
     it('GET /api/items — filters by price range', async () => {
-        Item.find.mockReturnValue({ skip: jest.fn().mockReturnValue({ limit: jest.fn().mockResolvedValue([mockItem]) }) });
+        Item.find.mockReturnValue({ sort: jest.fn().mockReturnValue({ skip: jest.fn().mockReturnValue({ limit: jest.fn().mockResolvedValue([mockItem]) }) }) });
         Item.countDocuments.mockResolvedValue(1);
 
         const res = await request(app).get('/api/items?minPrice=10&maxPrice=50');
         expect(res.status).toBe(200);
         expect(Item.find).toHaveBeenCalledWith(expect.objectContaining({ price: { $gte: 10, $lte: 50 } }));
+    });
+
+    it('GET /api/items — sorts by price ascending', async () => {
+        const sortMock = jest.fn().mockReturnValue({ skip: jest.fn().mockReturnValue({ limit: jest.fn().mockResolvedValue([mockItem]) }) });
+        Item.find.mockReturnValue({ sort: sortMock });
+        Item.countDocuments.mockResolvedValue(1);
+
+        const res = await request(app).get('/api/items?sortBy=price&order=asc');
+        expect(res.status).toBe(200);
+        expect(sortMock).toHaveBeenCalledWith({ price: 1 });
+    });
+
+    it('GET /api/items — sorts by name descending by default', async () => {
+        const sortMock = jest.fn().mockReturnValue({ skip: jest.fn().mockReturnValue({ limit: jest.fn().mockResolvedValue([mockItem]) }) });
+        Item.find.mockReturnValue({ sort: sortMock });
+        Item.countDocuments.mockResolvedValue(1);
+
+        const res = await request(app).get('/api/items?sortBy=name');
+        expect(res.status).toBe(200);
+        expect(sortMock).toHaveBeenCalledWith({ name: -1 });
+    });
+
+    it('GET /api/items — rejects invalid minPrice', async () => {
+        const res = await request(app).get('/api/items?minPrice=abc');
+        expect(res.status).toBe(400);
+        expect(res.body).toHaveProperty('message');
     });
 
     it('GET /api/items/:id — returns item by id', async () => {
