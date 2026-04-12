@@ -114,12 +114,47 @@ describe('Items routes', () => {
         });
     });
 
-    it('GET /api/items — returns list of items', async () => {
-        Item.find.mockResolvedValue([mockItem]);
+    it('GET /api/items — returns paginated list of items', async () => {
+        Item.find.mockReturnValue({ skip: jest.fn().mockReturnValue({ limit: jest.fn().mockResolvedValue([mockItem]) }) });
+        Item.countDocuments.mockResolvedValue(1);
 
         const res = await request(app).get('/api/items');
         expect(res.status).toBe(200);
-        expect(Array.isArray(res.body)).toBe(true);
+        expect(res.body).toHaveProperty('data');
+        expect(Array.isArray(res.body.data)).toBe(true);
+        expect(res.body).toHaveProperty('total', 1);
+        expect(res.body).toHaveProperty('page', 1);
+        expect(res.body).toHaveProperty('limit', 20);
+        expect(res.body).toHaveProperty('pages', 1);
+    });
+
+    it('GET /api/items — respects page and limit query params', async () => {
+        Item.find.mockReturnValue({ skip: jest.fn().mockReturnValue({ limit: jest.fn().mockResolvedValue([mockItem]) }) });
+        Item.countDocuments.mockResolvedValue(50);
+
+        const res = await request(app).get('/api/items?page=2&limit=10');
+        expect(res.status).toBe(200);
+        expect(res.body.page).toBe(2);
+        expect(res.body.limit).toBe(10);
+        expect(res.body.pages).toBe(5);
+    });
+
+    it('GET /api/items — filters by category and color', async () => {
+        Item.find.mockReturnValue({ skip: jest.fn().mockReturnValue({ limit: jest.fn().mockResolvedValue([mockItem]) }) });
+        Item.countDocuments.mockResolvedValue(1);
+
+        const res = await request(app).get('/api/items?category=Shirts&color=Blue');
+        expect(res.status).toBe(200);
+        expect(Item.find).toHaveBeenCalledWith(expect.objectContaining({ category: 'Shirts', color: 'Blue' }));
+    });
+
+    it('GET /api/items — filters by price range', async () => {
+        Item.find.mockReturnValue({ skip: jest.fn().mockReturnValue({ limit: jest.fn().mockResolvedValue([mockItem]) }) });
+        Item.countDocuments.mockResolvedValue(1);
+
+        const res = await request(app).get('/api/items?minPrice=10&maxPrice=50');
+        expect(res.status).toBe(200);
+        expect(Item.find).toHaveBeenCalledWith(expect.objectContaining({ price: { $gte: 10, $lte: 50 } }));
     });
 
     it('GET /api/items/:id — returns item by id', async () => {

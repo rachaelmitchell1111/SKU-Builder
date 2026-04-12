@@ -22,11 +22,43 @@ function validate(req, res, next) {
     next();
 }
 
-// GET all items
+// GET all items (with optional pagination and filtering)
+// Query params: page, limit, category, color, minPrice, maxPrice
 router.get('/', async (req, res, next) => {
     try {
-        const items = await Item.find();
-        res.status(200).json(items);
+        const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+        const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
+        const skip = (page - 1) * limit;
+
+        const filter = {};
+        if (req.query.category) filter.category = String(req.query.category);
+        if (req.query.color) filter.color = String(req.query.color);
+        if (req.query.minPrice !== undefined || req.query.maxPrice !== undefined) {
+            const minPrice = parseFloat(req.query.minPrice);
+            const maxPrice = parseFloat(req.query.maxPrice);
+            if (req.query.minPrice !== undefined && isNaN(minPrice)) {
+                return res.status(400).json({ message: 'minPrice must be a valid number.' });
+            }
+            if (req.query.maxPrice !== undefined && isNaN(maxPrice)) {
+                return res.status(400).json({ message: 'maxPrice must be a valid number.' });
+            }
+            filter.price = {};
+            if (!isNaN(minPrice)) filter.price.$gte = minPrice;
+            if (!isNaN(maxPrice)) filter.price.$lte = maxPrice;
+        }
+
+        const [items, total] = await Promise.all([
+            Item.find(filter).skip(skip).limit(limit),
+            Item.countDocuments(filter),
+        ]);
+
+        res.status(200).json({
+            data: items,
+            total,
+            page,
+            limit,
+            pages: Math.ceil(total / limit),
+        });
     } catch (error) {
         next(error);
     }
