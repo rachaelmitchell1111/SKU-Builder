@@ -5,8 +5,13 @@ require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
 const express = require('express');
+const helmet = require('helmet');
+const cors = require('cors');
 
 const app = express();
+
+app.use(helmet());
+app.use(cors());
 
 const itemsRouter = require('./routes/items');
 const authRouter = require('./routes/auth');
