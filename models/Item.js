@@ -15,8 +15,12 @@ const itemSchema = new mongoose.Schema({
         brandSize: { type: String },
         main: { type: String }
     },
+    isDeleted: { type: Boolean, default: false },
+    deletedAt: { type: Date, default: null },
     createdAt: { type: Date, default: Date.now }
 });
+
+itemSchema.index({ name: 'text', category: 'text' });
 
 const Item = mongoose.model('Item', itemSchema);
 

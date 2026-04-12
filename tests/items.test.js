@@ -79,6 +79,26 @@ describe('Auth routes', () => {
             .send({ email: 'not-an-email', password: 'password123' });
         expect(res.status).toBe(400);
     });
+
+    it('GET /api/auth/me — returns user profile when authenticated', async () => {
+        const token = makeToken(userId);
+        const mockUser = { _id: userId, email: credentials.email, createdAt: new Date().toISOString() };
+        User.findById = jest.fn().mockReturnValue({
+            select: jest.fn().mockResolvedValue(mockUser),
+        });
+
+        const res = await request(app)
+            .get('/api/auth/me')
+            .set('Authorization', `Bearer ${token}`);
+        expect(res.status).toBe(200);
+        expect(res.body).toHaveProperty('email', credentials.email);
+        expect(res.body).toHaveProperty('_id');
+    });
+
+    it('GET /api/auth/me — rejects unauthenticated request', async () => {
+        const res = await request(app).get('/api/auth/me');
+        expect(res.status).toBe(401);
+    });
 });
 
 // ── Items routes ──────────────────────────────────────────────────────────────
@@ -100,6 +120,8 @@ describe('Items routes', () => {
         _id: itemId,
         ...validItem,
         sku: 'SHI-BLU-1234',
+        isDeleted: false,
+        deletedAt: null,
     };
 
     beforeAll(() => {
@@ -126,6 +148,25 @@ describe('Items routes', () => {
         expect(res.body).toHaveProperty('page', 1);
         expect(res.body).toHaveProperty('limit', 20);
         expect(res.body).toHaveProperty('pages', 1);
+    });
+
+    it('GET /api/items — excludes soft-deleted items by default', async () => {
+        Item.find.mockReturnValue({ sort: jest.fn().mockReturnValue({ skip: jest.fn().mockReturnValue({ limit: jest.fn().mockResolvedValue([mockItem]) }) }) });
+        Item.countDocuments.mockResolvedValue(1);
+
+        const res = await request(app).get('/api/items');
+        expect(res.status).toBe(200);
+        expect(Item.find).toHaveBeenCalledWith(expect.objectContaining({ isDeleted: false }));
+    });
+
+    it('GET /api/items — includes soft-deleted items when includeDeleted=true', async () => {
+        Item.find.mockReturnValue({ sort: jest.fn().mockReturnValue({ skip: jest.fn().mockReturnValue({ limit: jest.fn().mockResolvedValue([mockItem]) }) }) });
+        Item.countDocuments.mockResolvedValue(1);
+
+        const res = await request(app).get('/api/items?includeDeleted=true');
+        expect(res.status).toBe(200);
+        const callArg = Item.find.mock.calls[0][0];
+        expect(callArg).not.toHaveProperty('isDeleted');
     });
 
     it('GET /api/items — respects page and limit query params', async () => {
@@ -183,8 +224,22 @@ describe('Items routes', () => {
         expect(res.body).toHaveProperty('message');
     });
 
+    it('GET /api/items — filters by search query q', async () => {
+        Item.find.mockReturnValue({ sort: jest.fn().mockReturnValue({ skip: jest.fn().mockReturnValue({ limit: jest.fn().mockResolvedValue([mockItem]) }) }) });
+        Item.countDocuments.mockResolvedValue(1);
+
+        const res = await request(app).get('/api/items?q=shirt');
+        expect(res.status).toBe(200);
+        expect(Item.find).toHaveBeenCalledWith(expect.objectContaining({
+            $or: [
+                { name: { $regex: 'shirt', $options: 'i' } },
+                { category: { $regex: 'shirt', $options: 'i' } },
+            ],
+        }));
+    });
+
     it('GET /api/items/:id — returns item by id', async () => {
-        Item.findById.mockResolvedValue(mockItem);
+        Item.findOne.mockResolvedValue(mockItem);
 
         const res = await request(app).get(`/api/items/${itemId}`);
         expect(res.status).toBe(200);
@@ -192,11 +247,18 @@ describe('Items routes', () => {
     });
 
     it('GET /api/items/:id — returns 404 for unknown id', async () => {
-        Item.findById.mockResolvedValue(null);
+        Item.findOne.mockResolvedValue(null);
 
         const fakeId = makeObjectId();
         const res = await request(app).get(`/api/items/${fakeId}`);
         expect(res.status).toBe(404);
+    });
+
+    it('GET /api/items/:id — excludes soft-deleted items by default', async () => {
+        Item.findOne.mockResolvedValue(null);
+
+        const res = await request(app).get(`/api/items/${itemId}`);
+        expect(Item.findOne).toHaveBeenCalledWith(expect.objectContaining({ isDeleted: false }));
     });
 
     it('POST /api/items — rejects unauthenticated request', async () => {
@@ -234,6 +296,34 @@ describe('Items routes', () => {
         expect(saveMock).toHaveBeenCalled();
     });
 
+    it('POST /api/items — retries on duplicate SKU and succeeds', async () => {
+        const dupError = Object.assign(new Error('duplicate key'), { code: 11000 });
+        const saveMock = jest.fn()
+            .mockRejectedValueOnce(dupError)
+            .mockResolvedValueOnce(mockItem);
+        Item.mockImplementation(() => ({ ...mockItem, save: saveMock }));
+
+        const res = await request(app)
+            .post('/api/items')
+            .set('Authorization', `Bearer ${token}`)
+            .send(validItem);
+        expect(res.status).toBe(201);
+        expect(saveMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('POST /api/items — returns 409 after exhausting SKU retries', async () => {
+        const dupError = Object.assign(new Error('duplicate key'), { code: 11000 });
+        const saveMock = jest.fn().mockRejectedValue(dupError);
+        Item.mockImplementation(() => ({ ...mockItem, save: saveMock }));
+
+        const res = await request(app)
+            .post('/api/items')
+            .set('Authorization', `Bearer ${token}`)
+            .send(validItem);
+        expect(res.status).toBe(409);
+        expect(saveMock).toHaveBeenCalledTimes(3);
+    });
+
     it('PUT /api/items/:id — updates item', async () => {
         Item.findByIdAndUpdate.mockResolvedValue({ ...mockItem, price: 39.99 });
 
@@ -252,13 +342,18 @@ describe('Items routes', () => {
         expect(res.status).toBe(401);
     });
 
-    it('DELETE /api/items/:id — deletes the item', async () => {
-        Item.findByIdAndDelete.mockResolvedValue(mockItem);
+    it('DELETE /api/items/:id — soft-deletes the item', async () => {
+        Item.findOneAndUpdate.mockResolvedValue({ ...mockItem, isDeleted: true, deletedAt: new Date() });
 
         const res = await request(app)
             .delete(`/api/items/${itemId}`)
             .set('Authorization', `Bearer ${token}`);
         expect(res.status).toBe(204);
+        expect(Item.findOneAndUpdate).toHaveBeenCalledWith(
+            { _id: itemId, isDeleted: false },
+            { $set: expect.objectContaining({ isDeleted: true }) },
+            { new: true }
+        );
     });
 
     it('DELETE /api/items/:id — rejects unauthenticated request', async () => {
@@ -266,14 +361,42 @@ describe('Items routes', () => {
         expect(res.status).toBe(401);
     });
 
-    it('DELETE /api/items/:id — returns 404 for unknown id', async () => {
-        Item.findByIdAndDelete.mockResolvedValue(null);
+    it('DELETE /api/items/:id — returns 404 for unknown or already-deleted id', async () => {
+        Item.findOneAndUpdate.mockResolvedValue(null);
 
         const fakeId = makeObjectId();
         const res = await request(app)
             .delete(`/api/items/${fakeId}`)
             .set('Authorization', `Bearer ${token}`);
         expect(res.status).toBe(404);
+    });
+
+    it('PATCH /api/items/:id/restore — restores a soft-deleted item', async () => {
+        Item.findOneAndUpdate.mockResolvedValue({ ...mockItem, isDeleted: false, deletedAt: null });
+
+        const res = await request(app)
+            .patch(`/api/items/${itemId}/restore`)
+            .set('Authorization', `Bearer ${token}`);
+        expect(res.status).toBe(200);
+        expect(Item.findOneAndUpdate).toHaveBeenCalledWith(
+            { _id: itemId, isDeleted: true },
+            { $set: { isDeleted: false, deletedAt: null } },
+            { new: true }
+        );
+    });
+
+    it('PATCH /api/items/:id/restore — returns 404 if item is not deleted', async () => {
+        Item.findOneAndUpdate.mockResolvedValue(null);
+
+        const res = await request(app)
+            .patch(`/api/items/${itemId}/restore`)
+            .set('Authorization', `Bearer ${token}`);
+        expect(res.status).toBe(404);
+    });
+
+    it('PATCH /api/items/:id/restore — rejects unauthenticated request', async () => {
+        const res = await request(app).patch(`/api/items/${itemId}/restore`);
+        expect(res.status).toBe(401);
     });
 });
 

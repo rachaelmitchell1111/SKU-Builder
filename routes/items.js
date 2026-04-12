@@ -44,8 +44,8 @@ function validate(req, res, next) {
     next();
 }
 
-// GET all items (with optional pagination, filtering, and sorting)
-// Query params: page, limit, category, color, minPrice, maxPrice, sortBy, order
+// GET all items (with optional pagination, filtering, sorting, and search)
+// Query params: page, limit, category, color, minPrice, maxPrice, sortBy, order, q, includeDeleted
 router.get('/', readLimiter, async (req, res, next) => {
     try {
         const page = Math.max(1, parseInt(req.query.page, 10) || 1);
@@ -53,6 +53,12 @@ router.get('/', readLimiter, async (req, res, next) => {
         const skip = (page - 1) * limit;
 
         const filter = {};
+
+        // Exclude soft-deleted items unless explicitly requested
+        if (req.query.includeDeleted !== 'true') {
+            filter.isDeleted = false;
+        }
+
         if (req.query.category) filter.category = String(req.query.category);
         if (req.query.color) filter.color = String(req.query.color);
         if (req.query.minPrice !== undefined || req.query.maxPrice !== undefined) {
@@ -67,6 +73,14 @@ router.get('/', readLimiter, async (req, res, next) => {
             filter.price = {};
             if (!isNaN(minPrice)) filter.price.$gte = minPrice;
             if (!isNaN(maxPrice)) filter.price.$lte = maxPrice;
+        }
+
+        // Full-text search across name and category
+        if (req.query.q) {
+            filter.$or = [
+                { name: { $regex: String(req.query.q), $options: 'i' } },
+                { category: { $regex: String(req.query.q), $options: 'i' } },
+            ];
         }
 
         const allowedSortFields = ['name', 'price', 'createdAt', 'stockAmount'];
@@ -95,7 +109,11 @@ router.get('/', readLimiter, async (req, res, next) => {
 router.get('/:id', readLimiter, async (req, res, next) => {
     try {
         if (!isValidObjectId(req.params.id)) return res.status(400).json({ message: 'Invalid item ID.' });
-        const item = await Item.findById(req.params.id);
+        const itemFilter = { _id: req.params.id };
+        if (req.query.includeDeleted !== 'true') {
+            itemFilter.isDeleted = false;
+        }
+        const item = await Item.findOne(itemFilter);
         if (!item) return res.status(404).json({ message: 'Item not found.' });
         res.status(200).json(item);
     } catch (error) {
@@ -107,17 +125,32 @@ router.get('/:id', readLimiter, async (req, res, next) => {
 router.post('/', writeLimiter, protect, itemValidation, validate, async (req, res, next) => {
     try {
         const { name, price, category, color, stockAmount, images } = req.body;
-        const newItem = new Item({
-            name,
-            price,
-            category,
-            color,
-            stockAmount,
-            images,
-            sku: generateSKU(category, color),
-        });
-        await newItem.save();
-        res.status(201).json(newItem);
+        const MAX_SKU_ATTEMPTS = 3;
+        let newItem;
+        for (let attempt = 1; attempt <= MAX_SKU_ATTEMPTS; attempt++) {
+            newItem = new Item({
+                name,
+                price,
+                category,
+                color,
+                stockAmount,
+                images,
+                sku: generateSKU(category, color),
+            });
+            try {
+                await newItem.save();
+                return res.status(201).json(newItem);
+            } catch (saveErr) {
+                if (saveErr.code === 11000 && attempt < MAX_SKU_ATTEMPTS) {
+                    // Duplicate SKU — regenerate and retry
+                    continue;
+                }
+                if (saveErr.code === 11000) {
+                    return res.status(409).json({ message: 'Could not generate a unique SKU. Please try again.' });
+                }
+                throw saveErr;
+            }
+        }
     } catch (error) {
         next(error);
     }
@@ -188,7 +221,14 @@ router.put('/:id', writeLimiter, protect, async (req, res, next) => {
             updates.stockAmount = stockAmount;
         }
         if (Object.prototype.hasOwnProperty.call(req.body, 'images') && typeof req.body.images === 'object' && req.body.images !== null) {
-            updates.images = req.body.images;
+            const imageFields = ['top', 'bottom', 'left', 'right', 'brandSize', 'main'];
+            const sanitizedImages = {};
+            for (const field of imageFields) {
+                if (Object.prototype.hasOwnProperty.call(req.body.images, field) && req.body.images[field] != null) {
+                    sanitizedImages[field] = String(req.body.images[field]);
+                }
+            }
+            updates.images = sanitizedImages;
         }
         const updatedItem = await Item.findByIdAndUpdate(req.params.id, updates, { new: true, runValidators: true });
         if (!updatedItem) return res.status(404).json({ message: 'Item not found.' });
@@ -198,13 +238,33 @@ router.put('/:id', writeLimiter, protect, async (req, res, next) => {
     }
 });
 
-// DELETE item
+// DELETE item (soft-delete)
 router.delete('/:id', writeLimiter, protect, async (req, res, next) => {
     try {
         if (!isValidObjectId(req.params.id)) return res.status(400).json({ message: 'Invalid item ID.' });
-        const deletedItem = await Item.findByIdAndDelete(req.params.id);
-        if (!deletedItem) return res.status(404).json({ message: 'Item not found.' });
+        const updatedItem = await Item.findOneAndUpdate(
+            { _id: req.params.id, isDeleted: false },
+            { $set: { isDeleted: true, deletedAt: new Date() } },
+            { new: true }
+        );
+        if (!updatedItem) return res.status(404).json({ message: 'Item not found.' });
         res.status(204).send();
+    } catch (error) {
+        next(error);
+    }
+});
+
+// PATCH restore a soft-deleted item
+router.patch('/:id/restore', writeLimiter, protect, async (req, res, next) => {
+    try {
+        if (!isValidObjectId(req.params.id)) return res.status(400).json({ message: 'Invalid item ID.' });
+        const restoredItem = await Item.findOneAndUpdate(
+            { _id: req.params.id, isDeleted: true },
+            { $set: { isDeleted: false, deletedAt: null } },
+            { new: true }
+        );
+        if (!restoredItem) return res.status(404).json({ message: 'Item not found or not deleted.' });
+        res.status(200).json(restoredItem);
     } catch (error) {
         next(error);
     }

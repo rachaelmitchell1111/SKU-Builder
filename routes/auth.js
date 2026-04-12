@@ -4,6 +4,7 @@ const jwt = require('jsonwebtoken');
 const rateLimit = require('express-rate-limit');
 const { body, validationResult } = require('express-validator');
 const User = require('../models/User');
+const { protect } = require('../middleware/auth');
 
 const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
@@ -73,5 +74,18 @@ router.post(
         }
     }
 );
+
+// GET /api/auth/me — return current user's profile
+router.get('/me', authLimiter, protect, async (req, res, next) => {
+    try {
+        res.status(200).json({
+            _id: req.user._id,
+            email: req.user.email,
+            createdAt: req.user.createdAt,
+        });
+    } catch (error) {
+        next(error);
+    }
+});
 
 module.exports = router;
