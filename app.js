@@ -15,6 +15,8 @@ app.use(cors());
 
 const itemsRouter = require('./routes/items');
 const authRouter = require('./routes/auth');
+const swaggerUi = require('swagger-ui-express');
+const swaggerSpec = require('./swagger');
 
 // Ensure uploads directory exists
 const uploadsDir = path.join(__dirname, 'uploads');
@@ -26,6 +28,8 @@ app.use(express.json());
 app.use('/uploads', express.static(uploadsDir));
 app.use('/api/auth', authRouter);
 app.use('/api/items', itemsRouter);
+app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+app.get('/api/docs.json', (req, res) => { res.setHeader('Content-Type', 'application/json'); res.send(swaggerSpec); });
 
 app.get('/', (req, res) => {
     res.send('Hello, world!');

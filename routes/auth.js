@@ -81,6 +81,7 @@ router.get('/me', authLimiter, protect, async (req, res, next) => {
         res.status(200).json({
             _id: req.user._id,
             email: req.user.email,
+            role: req.user.role,
             createdAt: req.user.createdAt,
         });
     } catch (error) {

@@ -4,8 +4,9 @@ const { body, validationResult } = require('express-validator');
 const rateLimit = require('express-rate-limit');
 const mongoose = require('mongoose');
 const Item = require('../models/Item');
+const AuditLog = require('../models/AuditLog');
 const { generateSKU } = require('../index');
-const { protect } = require('../middleware/auth');
+const { protect, optionalAuth, requireAdmin } = require('../middleware/auth');
 const upload = require('../middleware/upload');
 
 const readLimiter = rateLimit({
@@ -46,7 +47,7 @@ function validate(req, res, next) {
 
 // GET all items (with optional pagination, filtering, sorting, and search)
 // Query params: page, limit, category, color, minPrice, maxPrice, sortBy, order, q, includeDeleted
-router.get('/', readLimiter, async (req, res, next) => {
+router.get('/', readLimiter, optionalAuth, async (req, res, next) => {
     try {
         const page = Math.max(1, parseInt(req.query.page, 10) || 1);
         const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
@@ -54,7 +55,11 @@ router.get('/', readLimiter, async (req, res, next) => {
 
         const filter = {};
 
-        // Exclude soft-deleted items unless explicitly requested
+        // Only admins may request soft-deleted items
+        const isAdmin = req.user && req.user.role === 'admin';
+        if (req.query.includeDeleted === 'true' && !isAdmin) {
+            return res.status(403).json({ message: 'Admin access required.' });
+        }
         if (req.query.includeDeleted !== 'true') {
             filter.isDeleted = false;
         }
@@ -106,9 +111,13 @@ router.get('/', readLimiter, async (req, res, next) => {
 });
 
 // GET item by ID
-router.get('/:id', readLimiter, async (req, res, next) => {
+router.get('/:id', readLimiter, optionalAuth, async (req, res, next) => {
     try {
         if (!isValidObjectId(req.params.id)) return res.status(400).json({ message: 'Invalid item ID.' });
+        const isAdmin = req.user && req.user.role === 'admin';
+        if (req.query.includeDeleted === 'true' && !isAdmin) {
+            return res.status(403).json({ message: 'Admin access required.' });
+        }
         const itemFilter = { _id: req.params.id };
         if (req.query.includeDeleted !== 'true') {
             itemFilter.isDeleted = false;
@@ -139,6 +148,7 @@ router.post('/', writeLimiter, protect, itemValidation, validate, async (req, re
             });
             try {
                 await newItem.save();
+                await AuditLog.create({ userId: req.user._id, itemId: newItem._id, action: 'create' });
                 return res.status(201).json(newItem);
             } catch (saveErr) {
                 if (saveErr.code === 11000 && attempt < MAX_SKU_ATTEMPTS) {
@@ -232,14 +242,15 @@ router.put('/:id', writeLimiter, protect, async (req, res, next) => {
         }
         const updatedItem = await Item.findByIdAndUpdate(req.params.id, updates, { new: true, runValidators: true });
         if (!updatedItem) return res.status(404).json({ message: 'Item not found.' });
+        await AuditLog.create({ userId: req.user._id, itemId: updatedItem._id, action: 'update', diff: updates });
         res.status(200).json(updatedItem);
     } catch (error) {
         next(error);
     }
 });
 
-// DELETE item (soft-delete)
-router.delete('/:id', writeLimiter, protect, async (req, res, next) => {
+// DELETE item (soft-delete) — admin only
+router.delete('/:id', writeLimiter, protect, requireAdmin, async (req, res, next) => {
     try {
         if (!isValidObjectId(req.params.id)) return res.status(400).json({ message: 'Invalid item ID.' });
         const updatedItem = await Item.findOneAndUpdate(
@@ -248,14 +259,15 @@ router.delete('/:id', writeLimiter, protect, async (req, res, next) => {
             { new: true }
         );
         if (!updatedItem) return res.status(404).json({ message: 'Item not found.' });
+        await AuditLog.create({ userId: req.user._id, itemId: updatedItem._id, action: 'delete' });
         res.status(204).send();
     } catch (error) {
         next(error);
     }
 });
 
-// PATCH restore a soft-deleted item
-router.patch('/:id/restore', writeLimiter, protect, async (req, res, next) => {
+// PATCH restore a soft-deleted item — admin only
+router.patch('/:id/restore', writeLimiter, protect, requireAdmin, async (req, res, next) => {
     try {
         if (!isValidObjectId(req.params.id)) return res.status(400).json({ message: 'Invalid item ID.' });
         const restoredItem = await Item.findOneAndUpdate(
@@ -264,7 +276,50 @@ router.patch('/:id/restore', writeLimiter, protect, async (req, res, next) => {
             { new: true }
         );
         if (!restoredItem) return res.status(404).json({ message: 'Item not found or not deleted.' });
+        await AuditLog.create({ userId: req.user._id, itemId: restoredItem._id, action: 'restore' });
         res.status(200).json(restoredItem);
+    } catch (error) {
+        next(error);
+    }
+});
+
+// POST bulk soft-delete — admin only
+// Body: { ids: [string] }
+router.post('/bulk-delete', writeLimiter, protect, requireAdmin, async (req, res, next) => {
+    try {
+        const ids = Array.isArray(req.body.ids) ? req.body.ids : [];
+        const validIds = ids.map(String).filter(isValidObjectId);
+        if (validIds.length === 0) {
+            return res.status(400).json({ message: 'No valid item IDs provided.' });
+        }
+        const result = await Item.updateMany(
+            { _id: { $in: validIds }, isDeleted: false },
+            { $set: { isDeleted: true, deletedAt: new Date() } }
+        );
+        const logs = validIds.map((id) => ({ userId: req.user._id, itemId: id, action: 'bulk-delete' }));
+        await AuditLog.insertMany(logs, { ordered: false });
+        res.status(200).json({ deleted: result.modifiedCount });
+    } catch (error) {
+        next(error);
+    }
+});
+
+// POST bulk restore — admin only
+// Body: { ids: [string] }
+router.post('/bulk-restore', writeLimiter, protect, requireAdmin, async (req, res, next) => {
+    try {
+        const ids = Array.isArray(req.body.ids) ? req.body.ids : [];
+        const validIds = ids.map(String).filter(isValidObjectId);
+        if (validIds.length === 0) {
+            return res.status(400).json({ message: 'No valid item IDs provided.' });
+        }
+        const result = await Item.updateMany(
+            { _id: { $in: validIds }, isDeleted: true },
+            { $set: { isDeleted: false, deletedAt: null } }
+        );
+        const logs = validIds.map((id) => ({ userId: req.user._id, itemId: id, action: 'bulk-restore' }));
+        await AuditLog.insertMany(logs, { ordered: false });
+        res.status(200).json({ restored: result.modifiedCount });
     } catch (error) {
         next(error);
     }

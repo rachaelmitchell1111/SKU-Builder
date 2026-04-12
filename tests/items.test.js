@@ -6,9 +6,11 @@ const mongoose = require('mongoose');
 // Mock mongoose models before app is required
 jest.mock('../models/Item');
 jest.mock('../models/User');
+jest.mock('../models/AuditLog');
 
 const Item = require('../models/Item');
 const User = require('../models/User');
+const AuditLog = require('../models/AuditLog');
 const app = require('../app');
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -82,7 +84,7 @@ describe('Auth routes', () => {
 
     it('GET /api/auth/me — returns user profile when authenticated', async () => {
         const token = makeToken(userId);
-        const mockUser = { _id: userId, email: credentials.email, createdAt: new Date().toISOString() };
+        const mockUser = { _id: userId, email: credentials.email, role: 'user', createdAt: new Date().toISOString() };
         User.findById = jest.fn().mockReturnValue({
             select: jest.fn().mockResolvedValue(mockUser),
         });
@@ -93,6 +95,7 @@ describe('Auth routes', () => {
         expect(res.status).toBe(200);
         expect(res.body).toHaveProperty('email', credentials.email);
         expect(res.body).toHaveProperty('_id');
+        expect(res.body).toHaveProperty('role', 'user');
     });
 
     it('GET /api/auth/me — rejects unauthenticated request', async () => {
@@ -130,10 +133,12 @@ describe('Items routes', () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
-        // auth middleware: User.findById().select()
+        // auth middleware: User.findById().select() — admin user by default for write tests
         User.findById = jest.fn().mockReturnValue({
-            select: jest.fn().mockResolvedValue({ _id: userId }),
+            select: jest.fn().mockResolvedValue({ _id: userId, role: 'admin' }),
         });
+        AuditLog.create = jest.fn().mockResolvedValue({});
+        AuditLog.insertMany = jest.fn().mockResolvedValue([]);
     });
 
     it('GET /api/items — returns paginated list of items', async () => {
@@ -159,11 +164,13 @@ describe('Items routes', () => {
         expect(Item.find).toHaveBeenCalledWith(expect.objectContaining({ isDeleted: false }));
     });
 
-    it('GET /api/items — includes soft-deleted items when includeDeleted=true', async () => {
+    it('GET /api/items — includes soft-deleted items when includeDeleted=true (admin)', async () => {
         Item.find.mockReturnValue({ sort: jest.fn().mockReturnValue({ skip: jest.fn().mockReturnValue({ limit: jest.fn().mockResolvedValue([mockItem]) }) }) });
         Item.countDocuments.mockResolvedValue(1);
 
-        const res = await request(app).get('/api/items?includeDeleted=true');
+        const res = await request(app)
+            .get('/api/items?includeDeleted=true')
+            .set('Authorization', `Bearer ${token}`);
         expect(res.status).toBe(200);
         const callArg = Item.find.mock.calls[0][0];
         expect(callArg).not.toHaveProperty('isDeleted');
@@ -397,6 +404,119 @@ describe('Items routes', () => {
     it('PATCH /api/items/:id/restore — rejects unauthenticated request', async () => {
         const res = await request(app).patch(`/api/items/${itemId}/restore`);
         expect(res.status).toBe(401);
+    });
+
+    it('DELETE /api/items/:id — rejects non-admin user', async () => {
+        User.findById = jest.fn().mockReturnValue({
+            select: jest.fn().mockResolvedValue({ _id: userId, role: 'user' }),
+        });
+        const res = await request(app)
+            .delete(`/api/items/${itemId}`)
+            .set('Authorization', `Bearer ${token}`);
+        expect(res.status).toBe(403);
+    });
+
+    it('PATCH /api/items/:id/restore — rejects non-admin user', async () => {
+        User.findById = jest.fn().mockReturnValue({
+            select: jest.fn().mockResolvedValue({ _id: userId, role: 'user' }),
+        });
+        const res = await request(app)
+            .patch(`/api/items/${itemId}/restore`)
+            .set('Authorization', `Bearer ${token}`);
+        expect(res.status).toBe(403);
+    });
+
+    it('GET /api/items — rejects includeDeleted=true for non-admin', async () => {
+        User.findById = jest.fn().mockReturnValue({
+            select: jest.fn().mockResolvedValue({ _id: userId, role: 'user' }),
+        });
+        const res = await request(app)
+            .get('/api/items?includeDeleted=true')
+            .set('Authorization', `Bearer ${token}`);
+        expect(res.status).toBe(403);
+    });
+
+    it('GET /api/items — rejects includeDeleted=true for unauthenticated request', async () => {
+        const res = await request(app).get('/api/items?includeDeleted=true');
+        expect(res.status).toBe(403);
+    });
+
+    it('POST /api/items/bulk-delete — soft-deletes multiple items', async () => {
+        const id1 = makeObjectId();
+        const id2 = makeObjectId();
+        Item.updateMany.mockResolvedValue({ modifiedCount: 2 });
+
+        const res = await request(app)
+            .post('/api/items/bulk-delete')
+            .set('Authorization', `Bearer ${token}`)
+            .send({ ids: [id1, id2] });
+        expect(res.status).toBe(200);
+        expect(res.body).toHaveProperty('deleted', 2);
+        expect(Item.updateMany).toHaveBeenCalledWith(
+            { _id: { $in: [id1, id2] }, isDeleted: false },
+            { $set: expect.objectContaining({ isDeleted: true }) }
+        );
+    });
+
+    it('POST /api/items/bulk-delete — rejects unauthenticated request', async () => {
+        const res = await request(app)
+            .post('/api/items/bulk-delete')
+            .send({ ids: [makeObjectId()] });
+        expect(res.status).toBe(401);
+    });
+
+    it('POST /api/items/bulk-delete — rejects non-admin user', async () => {
+        User.findById = jest.fn().mockReturnValue({
+            select: jest.fn().mockResolvedValue({ _id: userId, role: 'user' }),
+        });
+        const res = await request(app)
+            .post('/api/items/bulk-delete')
+            .set('Authorization', `Bearer ${token}`)
+            .send({ ids: [makeObjectId()] });
+        expect(res.status).toBe(403);
+    });
+
+    it('POST /api/items/bulk-delete — returns 400 for empty ids', async () => {
+        const res = await request(app)
+            .post('/api/items/bulk-delete')
+            .set('Authorization', `Bearer ${token}`)
+            .send({ ids: [] });
+        expect(res.status).toBe(400);
+    });
+
+    it('POST /api/items/bulk-restore — restores multiple items', async () => {
+        const id1 = makeObjectId();
+        const id2 = makeObjectId();
+        Item.updateMany.mockResolvedValue({ modifiedCount: 2 });
+
+        const res = await request(app)
+            .post('/api/items/bulk-restore')
+            .set('Authorization', `Bearer ${token}`)
+            .send({ ids: [id1, id2] });
+        expect(res.status).toBe(200);
+        expect(res.body).toHaveProperty('restored', 2);
+        expect(Item.updateMany).toHaveBeenCalledWith(
+            { _id: { $in: [id1, id2] }, isDeleted: true },
+            { $set: { isDeleted: false, deletedAt: null } }
+        );
+    });
+
+    it('POST /api/items/bulk-restore — rejects unauthenticated request', async () => {
+        const res = await request(app)
+            .post('/api/items/bulk-restore')
+            .send({ ids: [makeObjectId()] });
+        expect(res.status).toBe(401);
+    });
+
+    it('POST /api/items/bulk-restore — rejects non-admin user', async () => {
+        User.findById = jest.fn().mockReturnValue({
+            select: jest.fn().mockResolvedValue({ _id: userId, role: 'user' }),
+        });
+        const res = await request(app)
+            .post('/api/items/bulk-restore')
+            .set('Authorization', `Bearer ${token}`)
+            .send({ ids: [makeObjectId()] });
+        expect(res.status).toBe(403);
     });
 });
 
