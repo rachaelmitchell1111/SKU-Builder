@@ -7,7 +7,7 @@ const Item = require('../models/Item');
 const AuditLog = require('../models/AuditLog');
 const { generateSKU } = require('../index');
 const { protect, optionalAuth, requireAdmin } = require('../middleware/auth');
-const upload = require('../middleware/upload');
+const { upload, uploadBuffer } = require('../middleware/upload');
 
 const readLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
@@ -187,11 +187,14 @@ router.post(
 
             const files = req.files || {};
             const imageUpdates = {};
-            for (const field of ['top', 'bottom', 'left', 'right', 'brandSize', 'main']) {
-                if (files[field]) {
-                    imageUpdates[`images.${field}`] = files[field][0].path;
-                }
-            }
+            const IMAGE_FIELDS = ['top', 'bottom', 'left', 'right', 'brandSize', 'main'];
+            await Promise.all(
+                IMAGE_FIELDS.map(async (field) => {
+                    if (files[field]) {
+                        imageUpdates[`images.${field}`] = await uploadBuffer(files[field][0].buffer);
+                    }
+                })
+            );
 
             const updatedItem = await Item.findByIdAndUpdate(
                 req.params.id,
