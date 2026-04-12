@@ -8,6 +8,8 @@ const mongoose = require('mongoose');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+const itemsRouter = require('./routes/items');
+
 // MongoDB connection
 const dbURI = process.env.MONGODB_URI;
 if (!dbURI) {
@@ -16,6 +18,9 @@ if (!dbURI) {
 mongoose.connect(dbURI, { useNewUrlParser: true, useUnifiedTopology: true })
     .then(() => console.log('MongoDB connected'))
     .catch(err => console.error(err));
+
+app.use(express.json());
+app.use('/api/items', itemsRouter);
 
 app.get('/', (req, res) => {
     res.send('Hello, world!');
