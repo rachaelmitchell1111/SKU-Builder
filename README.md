@@ -10,9 +10,21 @@ A Node.js/Express backend + Next.js frontend for managing inventory items with a
 
 ```bash
 npm install
-cp .env.example .env   # fill in MONGODB_URI, JWT_SECRET
+cp .env.example .env   # fill in MONGODB_URI, JWT_SECRET, and Cloudinary credentials
 npm run dev            # starts on http://localhost:3000
 ```
+
+### Image Storage
+
+Uploaded images are stored in [Cloudinary](https://cloudinary.com) (free tier available) under the `sku-builder` folder.
+
+Set the following variables in `.env`:
+
+| Variable | Description |
+|---|---|
+| `CLOUDINARY_CLOUD_NAME` | Your Cloudinary cloud name |
+| `CLOUDINARY_API_KEY` | API key from the Cloudinary dashboard |
+| `CLOUDINARY_API_SECRET` | API secret from the Cloudinary dashboard |
 
 ### API Endpoints
 

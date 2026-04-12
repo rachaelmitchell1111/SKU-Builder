@@ -2,8 +2,6 @@
 
 require('dotenv').config();
 
-const fs = require('fs');
-const path = require('path');
 const express = require('express');
 const helmet = require('helmet');
 const cors = require('cors');
@@ -18,14 +16,7 @@ const authRouter = require('./routes/auth');
 const swaggerUi = require('swagger-ui-express');
 const swaggerSpec = require('./swagger');
 
-// Ensure uploads directory exists
-const uploadsDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadsDir)) {
-    fs.mkdirSync(uploadsDir);
-}
-
 app.use(express.json());
-app.use('/uploads', express.static(uploadsDir));
 app.use('/api/auth', authRouter);
 app.use('/api/items', itemsRouter);
 app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
