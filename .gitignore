@@ -27,6 +27,7 @@ coverage/
 # Build output
 dist/
 build/
+frontend/.next/
 
 # Uploaded files
 uploads/
