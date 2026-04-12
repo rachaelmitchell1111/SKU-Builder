@@ -27,8 +27,8 @@ router.get('/:id', async (req, res) => {
 // POST create new item with auto-generated SKU
 router.post('/', async (req, res) => {
     try {
-        const { name, price } = req.body;
-        const newItem = new Item({ name, price, sku: generateSKU() });
+        const { name, price, category, color } = req.body;
+        const newItem = new Item({ name, price, sku: generateSKU(category, color) });
         await newItem.save();
         res.status(201).json(newItem);
     } catch (error) {
