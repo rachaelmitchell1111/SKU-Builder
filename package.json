@@ -1,1 +1,15 @@
-{\n  "name": "inventory-app",\n  "version": "1.0.0",\n  "description": "A Node.js + Express inventory app that integrates SKU Builder.",\n  "main": "server.js",\n  "scripts": {\n    "start": "node server.js",\n    "dev": "nodemon server.js"\n  },\n  "dependencies": {\n    "express": "^4.17.1",\n    "mongoose": "^5.9.25",\n    "dotenv": "^8.2.0"\n  }\n}
+{
+  "name": "inventory-app",
+  "version": "1.0.0",
+  "description": "A Node.js + Express inventory app that integrates SKU Builder.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "dependencies": {
+    "express": "^4.17.1",
+    "mongoose": "^5.9.25",
+    "dotenv": "^8.2.0"
+  }
+}
