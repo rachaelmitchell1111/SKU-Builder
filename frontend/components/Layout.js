@@ -28,6 +28,14 @@ export default function Layout({ children }) {
                 </span>
               )}
             </span>
+            {user.role === 'admin' && (
+              <Link
+                href="/admin/users"
+                className="text-sm text-gray-500 hover:text-gray-800 transition-colors"
+              >
+                Admin
+              </Link>
+            )}
             <button
               onClick={handleLogout}
               className="text-sm text-gray-500 hover:text-gray-800 transition-colors"

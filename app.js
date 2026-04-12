@@ -13,12 +13,14 @@ app.use(cors());
 
 const itemsRouter = require('./routes/items');
 const authRouter = require('./routes/auth');
+const adminRouter = require('./routes/admin');
 const swaggerUi = require('swagger-ui-express');
 const swaggerSpec = require('./swagger');
 
 app.use(express.json());
 app.use('/api/auth', authRouter);
 app.use('/api/items', itemsRouter);
+app.use('/api/admin', adminRouter);
 app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 app.get('/api/docs.json', (req, res) => { res.setHeader('Content-Type', 'application/json'); res.send(swaggerSpec); });
 

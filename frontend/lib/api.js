@@ -67,3 +67,9 @@ export const bulkDelete = (ids) =>
 
 export const bulkRestore = (ids) =>
   request('/api/items/bulk-restore', { method: 'POST', body: JSON.stringify({ ids }) });
+
+// ── Admin ─────────────────────────────────────────────────────────────────────
+export const getUsers = () => request('/api/admin/users');
+
+export const setUserRole = (id, role) =>
+  request(`/api/admin/users/${id}/role`, { method: 'PATCH', body: JSON.stringify({ role }) });
