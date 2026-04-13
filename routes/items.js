@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
-const { Item, generateSKU } = require('./index');
+const Item = require('../models/Item');
+const { generateSKU } = require('../index');
 
 // GET all items
 router.get('/', async (req, res) => {
