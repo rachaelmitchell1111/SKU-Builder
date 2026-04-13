@@ -3,6 +3,4 @@ function generateSKU(category, color) {
     return `${category.toUpperCase().slice(0, 3)}-${color.toUpperCase().slice(0, 3)}-${randomNumbers}`;
 }
 
-// Example usage:
-console.log(generateSKU('Electronics', 'Red'));  // e.g. ELE-RED-1498
-console.log(generateSKU('Clothing', 'Blue'));    // e.g. CLO-BLU-1104
+module.exports = { generateSKU };
