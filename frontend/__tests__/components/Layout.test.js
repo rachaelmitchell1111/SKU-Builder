@@ -74,7 +74,8 @@ describe('Layout — regular user', () => {
 
   it('does NOT show the Admin link', () => {
     renderLayout(regularUser);
-    expect(screen.queryByRole('link', { name: /admin/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /^users$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /audit log/i })).not.toBeInTheDocument();
   });
 
   it('does NOT show the admin badge', () => {
@@ -99,11 +100,19 @@ describe('Layout — admin user', () => {
     expect(screen.getByText('admin')).toBeInTheDocument();
   });
 
-  it('shows the Admin nav link', () => {
+  it('shows the Users nav link', () => {
     renderLayout(adminUser);
-    expect(screen.getByRole('link', { name: /admin/i })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: /^users$/i })).toHaveAttribute(
       'href',
       '/admin/users',
+    );
+  });
+
+  it('shows the Audit Log nav link', () => {
+    renderLayout(adminUser);
+    expect(screen.getByRole('link', { name: /audit log/i })).toHaveAttribute(
+      'href',
+      '/admin/audit-logs',
     );
   });
 });

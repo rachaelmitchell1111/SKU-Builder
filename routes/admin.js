@@ -4,6 +4,7 @@ const rateLimit = require('express-rate-limit');
 const mongoose = require('mongoose');
 const { body, validationResult } = require('express-validator');
 const User = require('../models/User');
+const AuditLog = require('../models/AuditLog');
 const { protect, requireAdmin } = require('../middleware/auth');
 
 const adminLimiter = rateLimit({
@@ -60,5 +61,45 @@ router.patch(
         }
     }
 );
+
+const VALID_ACTIONS = ['create', 'update', 'delete', 'restore', 'bulk-delete', 'bulk-restore'];
+
+// GET /api/admin/audit-logs — paginated audit log (admin only)
+// Query params: page, limit, action, itemId
+router.get('/audit-logs', adminLimiter, protect, requireAdmin, async (req, res, next) => {
+    try {
+        const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+        const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 25));
+        const skip = (page - 1) * limit;
+
+        const filter = {};
+        if (req.query.action && VALID_ACTIONS.includes(req.query.action)) {
+            filter.action = req.query.action;
+        }
+        if (req.query.itemId && isValidObjectId(req.query.itemId)) {
+            filter.itemId = req.query.itemId;
+        }
+
+        const [logs, total] = await Promise.all([
+            AuditLog.find(filter)
+                .sort({ timestamp: -1 })
+                .skip(skip)
+                .limit(limit)
+                .populate('userId', 'email')
+                .populate('itemId', 'name sku'),
+            AuditLog.countDocuments(filter),
+        ]);
+
+        res.status(200).json({
+            data: logs,
+            total,
+            page,
+            limit,
+            pages: Math.ceil(total / limit),
+        });
+    } catch (err) {
+        next(err);
+    }
+});
 
 module.exports = router;

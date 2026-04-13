@@ -87,3 +87,9 @@ export const getUsers = () => request('/api/admin/users');
 
 export const setUserRole = (id, role) =>
   request(`/api/admin/users/${id}/role`, { method: 'PATCH', body: JSON.stringify({ role }) });
+
+export function getAuditLogs(params = {}) {
+  const entries = Object.entries(params).filter(([, v]) => v != null && v !== '');
+  const qs = new URLSearchParams(entries).toString();
+  return request(`/api/admin/audit-logs${qs ? '?' + qs : ''}`);
+}

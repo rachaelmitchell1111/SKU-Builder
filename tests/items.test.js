@@ -520,3 +520,114 @@ describe('Items routes', () => {
     });
 });
 
+// ── Admin: audit log route ────────────────────────────────────────────────────
+
+describe('GET /api/admin/audit-logs', () => {
+    const adminId = makeObjectId();
+    let adminToken;
+
+    const fakeLogs = [
+        {
+            _id: makeObjectId(),
+            action: 'create',
+            timestamp: new Date().toISOString(),
+            userId: { _id: adminId, email: 'admin@example.com' },
+            itemId: { _id: makeObjectId(), name: 'Test Shirt', sku: 'SHI-BLU-1234' },
+            diff: null,
+        },
+        {
+            _id: makeObjectId(),
+            action: 'update',
+            timestamp: new Date().toISOString(),
+            userId: { _id: adminId, email: 'admin@example.com' },
+            itemId: { _id: makeObjectId(), name: 'Test Shirt', sku: 'SHI-BLU-1234' },
+            diff: { price: 19.99 },
+        },
+    ];
+
+    beforeAll(() => {
+        adminToken = makeToken(adminId);
+    });
+
+    beforeEach(() => {
+        jest.clearAllMocks();
+        User.findById = jest.fn().mockReturnValue({
+            select: jest.fn().mockResolvedValue({ _id: adminId, role: 'admin' }),
+        });
+
+        // Mock AuditLog.find(...).sort().skip().limit().populate().populate()
+        const populateItem = jest.fn().mockResolvedValue(fakeLogs);
+        const populateUser = jest.fn().mockReturnValue({ populate: populateItem });
+        const limitMock = jest.fn().mockReturnValue({ populate: populateUser });
+        const skipMock = jest.fn().mockReturnValue({ limit: limitMock });
+        const sortMock = jest.fn().mockReturnValue({ skip: skipMock });
+        AuditLog.find = jest.fn().mockReturnValue({ sort: sortMock });
+        AuditLog.countDocuments = jest.fn().mockResolvedValue(fakeLogs.length);
+    });
+
+    it('returns 401 when unauthenticated', async () => {
+        const res = await request(app).get('/api/admin/audit-logs');
+        expect(res.status).toBe(401);
+    });
+
+    it('returns 403 for non-admin users', async () => {
+        User.findById = jest.fn().mockReturnValue({
+            select: jest.fn().mockResolvedValue({ _id: adminId, role: 'user' }),
+        });
+        const res = await request(app)
+            .get('/api/admin/audit-logs')
+            .set('Authorization', `Bearer ${adminToken}`);
+        expect(res.status).toBe(403);
+    });
+
+    it('returns paginated audit logs for admins', async () => {
+        const res = await request(app)
+            .get('/api/admin/audit-logs')
+            .set('Authorization', `Bearer ${adminToken}`);
+        expect(res.status).toBe(200);
+        expect(res.body).toHaveProperty('data');
+        expect(res.body).toHaveProperty('total');
+        expect(res.body).toHaveProperty('page');
+        expect(res.body).toHaveProperty('pages');
+        expect(Array.isArray(res.body.data)).toBe(true);
+    });
+
+    it('passes action filter to AuditLog.find', async () => {
+        const res = await request(app)
+            .get('/api/admin/audit-logs?action=create')
+            .set('Authorization', `Bearer ${adminToken}`);
+        expect(res.status).toBe(200);
+        expect(AuditLog.find).toHaveBeenCalledWith(expect.objectContaining({ action: 'create' }));
+    });
+
+    it('ignores invalid action filter values', async () => {
+        const res = await request(app)
+            .get('/api/admin/audit-logs?action=invalid-action')
+            .set('Authorization', `Bearer ${adminToken}`);
+        expect(res.status).toBe(200);
+        // 'action' key must not appear in the filter when invalid
+        expect(AuditLog.find).toHaveBeenCalledWith(
+            expect.not.objectContaining({ action: 'invalid-action' }),
+        );
+    });
+
+    it('passes itemId filter when a valid ObjectId is provided', async () => {
+        const id = makeObjectId();
+        const res = await request(app)
+            .get(`/api/admin/audit-logs?itemId=${id}`)
+            .set('Authorization', `Bearer ${adminToken}`);
+        expect(res.status).toBe(200);
+        expect(AuditLog.find).toHaveBeenCalledWith(expect.objectContaining({ itemId: id }));
+    });
+
+    it('ignores itemId filter when an invalid ObjectId is provided', async () => {
+        const res = await request(app)
+            .get('/api/admin/audit-logs?itemId=not-an-id')
+            .set('Authorization', `Bearer ${adminToken}`);
+        expect(res.status).toBe(200);
+        expect(AuditLog.find).toHaveBeenCalledWith(
+            expect.not.objectContaining({ itemId: 'not-an-id' }),
+        );
+    });
+});
+
