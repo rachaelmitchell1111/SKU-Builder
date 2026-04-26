@@ -1,40 +1,23 @@
-// server.js
-require('dotenv').config(); // Load environment variables
+'use strict';
 
-const express = require('express'); // Import express
-const mongoose = require('mongoose'); // Import MongoDB client
-const itemsRouter = require('./routes/items'); // Import items router
+require('dotenv').config();
 
-const app = express(); // Create an express application
+const express = require('express');
+const mongoose = require('mongoose');
 
-// Middleware
-app.use(express.json()); // Parse JSON bodies
-app.use(express.urlencoded({ extended: true })); // Parse URL-encoded data
+const app = require('./app');
 
-// Connect to MongoDB
-mongoose.connect(process.env.MONGODB_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-})
-.then(() => console.log('MongoDB connected'))
-.catch(err => console.error('MongoDB connection error:', err));
-
-// Route registration
-app.use('/api/items', itemsRouter);
-
-// 404 error handler
-app.use((req, res, next) => {
-  res.status(404).json({ message: 'Resource not found' });
-});
-
-// Global error handler
-app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({ message: 'Internal Server Error' });
-});
-
-// Start the server
 const PORT = process.env.PORT || 3000;
+
+// MongoDB connection
+const dbURI = process.env.MONGODB_URI;
+if (!dbURI) {
+    throw new Error('MONGODB_URI environment variable is not defined');
+}
+mongoose.connect(dbURI)
+    .then(() => console.log('MongoDB connected'))
+    .catch(err => console.error(err));
+
 app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
+    console.log(`Server is running on port ${PORT}`);
 });

@@ -1,0 +1,34 @@
+{
+  "name": "sku-builder-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 3001",
+    "build": "next build",
+    "start": "next start -p 3001",
+    "lint": "next lint",
+    "test": "jest --forceExit",
+    "test:watch": "jest --watch"
+  },
+  "dependencies": {
+    "next": "15.5.15",
+    "react": "^18",
+    "react-dom": "^18"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.29.0",
+    "@babel/preset-env": "^7.29.2",
+    "@babel/preset-react": "^7.28.5",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
+    "autoprefixer": "^10",
+    "babel-jest": "^30.3.0",
+    "eslint": "^8",
+    "eslint-config-next": "15.5.15",
+    "jest": "^30.3.0",
+    "jest-environment-jsdom": "^30.3.0",
+    "postcss": "^8",
+    "tailwindcss": "^3"
+  }
+}
